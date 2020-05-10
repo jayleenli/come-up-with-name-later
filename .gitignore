@@ -1,2 +1,3 @@
 email-contact-scraper/
 *.json
+*.pickle
