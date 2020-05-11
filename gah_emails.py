@@ -7,6 +7,7 @@ from google.auth.transport.requests import Request
 import email
 from apiclient import errors
 import re
+import time
 
 # If modifying these scopes, delete the file token.pickle.
 #we only want the readonly scope.
@@ -23,6 +24,7 @@ The intention for this script is so that You can have a nice list of emails from
 
 '''
 userEmail = None
+logChoice = None
 
 def get_msg(service, msg_id):
 	"""Get a Message with given ID.
@@ -39,7 +41,8 @@ def get_msg(service, msg_id):
 	try:
 		message = service.users().messages().get(userId='me', id=msg_id).execute()
 
-		print('Message snippet: %s' % message['snippet'])
+		if (logChoice): 
+			print('Message snippet: %s' % message['snippet'])
 
 		return message
 	except Exception as e:
@@ -65,7 +68,8 @@ def clean_dirty_email(dirty_email):
 		if (dirty_email.find("do_not_reply") != -1 or dirty_email.find("no-reply") != -1 or dirty_email.find("noreply") != -1 or dirty_email.find("donotreply") != -1 or dirty_email.find("DoNotReply") != -1 ):
 			return None
 		
-		if (dirty_email.find("bounce") != -1 or dirty_email.find("recruiting") != -1 or dirty_email.find("Recruiting") != -1 or dirty_email.find("myworkday") != -1 or dirty_email.find("jobvite") != -1 or dirty_email.find("candidate") != -1):
+		if (dirty_email.find("bounce") != -1 or dirty_email.find("recruiting") != -1 or dirty_email.find("Recruiting") != -1 or dirty_email.find("myworkday") != -1 or dirty_email.find("jobvite") != -1 
+			or dirty_email.find("candidate") != -1 or dirty_email.find("postmaster") != -1):
 			return None
 
 		#If the word workday appears before the @ symbol, highly unlikely to be an email
@@ -85,7 +89,28 @@ def Union(lst1, lst2):
     final_list = list(set(lst1) | set(lst2)) 
     return final_list 
 
-
+# Print iterations progress
+# Credit: https://stackoverflow.com/questions/3173320/text-progress-bar-in-the-console
+def printProgressBar (iteration, total, prefix = 'Current Page Progress: ', suffix = '', decimals = 1, length = 100, fill = '█', printEnd = "\r"):
+    """
+    Call in a loop to create terminal progress bar
+    @params:
+        iteration   - Required  : current iteration (Int)
+        total       - Required  : total iterations (Int)
+        prefix      - Optional  : prefix string (Str)
+        suffix      - Optional  : suffix string (Str)
+        decimals    - Optional  : positive number of decimals in percent complete (Int)
+        length      - Optional  : character length of bar (Int)
+        fill        - Optional  : bar fill character (Str)
+        printEnd    - Optional  : end character (e.g. "\r", "\r\n") (Str)
+    """
+    percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
+    filledLength = int(length * iteration // total)
+    bar = fill * filledLength + '-' * (length - filledLength)
+    print('\r%s |%s| %s%% %s' % (prefix, bar, percent, suffix), end = printEnd)
+    # Print New Line on Complete
+    if iteration == total: 
+        print()
 
 def main():
 	"""Shows basic usage of the Gmail API.
@@ -112,6 +137,22 @@ def main():
 
 	service = build('gmail', 'v1', credentials=creds)
 
+	print("Thanks for signing in. This script takes a while because it does go through all your emails.")
+	print("Would you like to display a loading bar or have console logs to show script progress? Type LOADINGBAR or CONSOLELOGS")
+
+	ans = input("Answer:")
+	global logChoice
+	while(ans != "LOADINGBAR" and ans != "CONSOLELOGS"):
+		print("Invalid response.")
+		ans = input("Answer:")
+	
+	if (ans == "LOADINGBAR"):
+		logChoice = False
+	elif(ans == "CONSOLELOGS"):
+		logChoice = True
+
+	print("\n")
+
 	#Get this user's current email
 	userProfileRes = service.users().getProfile(userId='me').execute()
 	global userEmail
@@ -121,6 +162,10 @@ def main():
 	applying_scraped_emails = []
 	interview_scraped_emails = []
 
+	loading_bar_index = 0
+	loading_bar_length = 25
+	page_number = 1
+
 	#Get emails in inbox. Currently only looks at inbox only, no spam
 	#Tried to optimize and find emails that match specific queries, so might not be perfect and miss some but maybe it will be fine.
 	#check through application emails 
@@ -128,9 +173,11 @@ def main():
 	query = "thank you for applying OR applying OR application OR applied OR Update on your application"
 	response = service.users().messages().list(userId='me', includeSpamTrash=False, labelIds = ["INBOX", "IMPORTANT"], maxResults="25", q=query).execute()
 	messages_curr_page = {}
+
+	print("\n\nNow reading Application related emails...\n\n")	
+
 	if 'messages' in response:
 		messages_curr_page = response['messages']
-		#print(messages_curr_page)
 		page_token = response['nextPageToken']
 		#For each page in the result messages, search through headers for sender address
 		#headers vary from different senders, so we are need to guess this, so also not accurate.
@@ -138,8 +185,8 @@ def main():
 		#https://mediatemple.net/community/products/dv/204643950/understanding-an-email-header
 		#Decided after research that these curernt feilds return the best results.
 
+		loading_bar_length = len(messages_curr_page)
 		#Get the message
-		print("\n\n\n")
 		for msg_info in messages_curr_page:
 			#get id
 			msg = get_msg(service, msg_info['id'])
@@ -147,24 +194,32 @@ def main():
 			
 			fields_to_search = (list(clean_dirty_email(h['value']) for h in headers 
 				if (h['name'] == 'Sender' or h['name'] == 'From' or h['name'] == 'Reply-To' or h['name'] == 'Return-Path' )))
-			print(fields_to_search)
+			if (logChoice): 
+				print(fields_to_search)
+
 			#Take values that passed the dirt cleaning and add to final list. 
 			for clean_field in fields_to_search:
 				if (clean_field != None):
 					applying_scraped_emails.append(clean_field)
-			
+			if(not logChoice):
+				loading_bar_index += 1
+				printProgressBar(loading_bar_index, loading_bar_length, suffix = 'Page '+str(page_number), length = loading_bar_length)
+		
+		loading_bar_index = 0
+		page_number += 1
 
-		'''#Go through every page in the query until none left. Will take a while
+		#Go through every page in the query until none left. Will take a while
 		while 'nextPageToken' in response:
 			response = service.users().messages().list(userId='me', includeSpamTrash=False, labelIds = ["INBOX", "IMPORTANT"], maxResults="25", pageToken=page_token, q=query).execute()
 
 			#I know code is pasted again 
 			messages_curr_page = response['messages']
-			print(messages_curr_page)
 			page_token = response['nextPageToken']
 
+			loading_bar_length = len(messages_curr_page)
 			#Get the message
-			print("\n\n\n")
+			if (logChoice): 
+				print("\n\nNEXT PAGE\n\n")
 			for msg_info in messages_curr_page:
 				#get id
 				msg = get_msg(service, msg_info['id'])
@@ -172,22 +227,30 @@ def main():
 				
 				fields_to_search = (list(clean_dirty_email(h['value']) for h in headers 
 					if (h['name'] == 'Sender' or h['name'] == 'From' or h['name'] == 'Reply-To' or h['name'] == 'Return-Path' )))
-				print(fields_to_search)
+				if (logChoice): 
+					print(fields_to_search)
 				#Take values that passed the dirt cleaning and add to final list. 
 				for clean_field in fields_to_search:
 					if (clean_field != None):
-						applying_scraped_emails.append(clean_field)'''
+						applying_scraped_emails.append(clean_field)
+				if(not logChoice):
+					loading_bar_index += 1
+					printProgressBar(loading_bar_index, loading_bar_length, suffix = 'Page '+str(page_number), length = loading_bar_length)
+		
+			loading_bar_index = 0
+			page_number += 1
 
-
-
-	#except Exception as e:
-	#   print('An error occurred: %s' % e)
 
 	#Now check through interview emails. May be overlap.
 	#Obviously interviews that were scheduled have a much higher chance of being a real email.
 	query = "interview OR phone screen OR technical "
 	response = service.users().messages().list(userId='me', includeSpamTrash=False, labelIds = ["INBOX", "IMPORTANT"], maxResults="25", q=query).execute()
 	messages_curr_page = {}
+
+	print("\n\nNow reading Interview related emails...\n\n")	
+	loading_bar_index = 0
+	page_number = 1
+
 	if 'messages' in response:
 		messages_curr_page = response['messages']
 		#print(messages_curr_page)
@@ -198,8 +261,9 @@ def main():
 		#https://mediatemple.net/community/products/dv/204643950/understanding-an-email-header
 		#Decided after research that these curernt feilds return the best results.
 
+		loading_bar_length = len(messages_curr_page)
+
 		#Get the message
-		print("\n\n\n")
 		for msg_info in messages_curr_page:
 			#get id
 			msg = get_msg(service, msg_info['id'])
@@ -207,24 +271,33 @@ def main():
 			
 			fields_to_search = (list(clean_dirty_email(h['value']) for h in headers 
 				if (h['name'] == 'Sender' or h['name'] == 'From' or h['name'] == 'Reply-To' or h['name'] == 'Return-Path' )))
-			print(fields_to_search)
+			if (logChoice): 
+				print(fields_to_search)
 			#Take values that passed the dirt cleaning and add to final list. 
 			for clean_field in fields_to_search:
 				if (clean_field != None):
 					interview_scraped_emails.append(clean_field)
+			if(not logChoice):
+				loading_bar_index += 1
+				printProgressBar(loading_bar_index, loading_bar_length, suffix = 'Page '+str(page_number), length = loading_bar_length)
+		
+		loading_bar_index = 0
+		page_number += 1
 			
 
-		'''#Go through every page in the query until none left. Will take a while
+		#Go through every page in the query until none left. Will take a while
 		while 'nextPageToken' in response:
 			response = service.users().messages().list(userId='me', includeSpamTrash=False, labelIds = ["INBOX", "IMPORTANT"], maxResults="25", pageToken=page_token, q=query).execute()
 
 			#I know code is pasted again 
 			messages_curr_page = response['messages']
-			print(messages_curr_page)
 			page_token = response['nextPageToken']
 
+			loading_bar_length = len(messages_curr_page)
+
 			#Get the message
-			print("\n\n\n")
+			if (logChoice): 
+				print("\n\nNEXT PAGE\n\n")
 			for msg_info in messages_curr_page:
 				#get id
 				msg = get_msg(service, msg_info['id'])
@@ -232,19 +305,28 @@ def main():
 				
 				fields_to_search = (list(clean_dirty_email(h['value']) for h in headers 
 					if (h['name'] == 'Sender' or h['name'] == 'From' or h['name'] == 'Reply-To' or h['name'] == 'Return-Path' )))
-				print(fields_to_search)
+				if (logChoice): 
+					print(fields_to_search)
 				#Take values that passed the dirt cleaning and add to final list. 
 				for clean_field in fields_to_search:
 					if (clean_field != None):
-						interview_scraped_emails.append(clean_field)'''
+						interview_scraped_emails.append(clean_field)
+				if(not logChoice):
+					loading_bar_index += 1
+					printProgressBar(loading_bar_index, loading_bar_length, suffix = 'Page '+str(page_number), length = loading_bar_length)
+		
+			loading_bar_index = 0
+			page_number += 1
 
 
 
 	#Print out the final list of cleaned emails
 	final_scraped_emails = Union(interview_scraped_emails, applying_scraped_emails)
-	print('\n\n\n\n')
+	print('\n\n\n')
 	print('Searched through all emails. Emails found that are most likely valid:')
-	print(final_scraped_emails)
+	print("\n".join(final_scraped_emails))
+
+	print("\nJust copy paste the emails and you are golden!")
 
 if __name__ == '__main__':
 	main()
