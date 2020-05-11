@@ -18,3 +18,5 @@ What this script does is uses the Gmail API to read your emails. (Don't worry, c
 
 Feel free to change the queries inside the script to potentially get a better range of emails. This script isn't perfect but it does it's job.
 
+#### Yes, I made a logo with my A+ artistic skills.
+![Logo](gahemails.png)
